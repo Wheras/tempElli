@@ -1,0 +1,33 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node
+react-ts-vite-tailwind/node_modules/
+
+# Build / Logs
+*.log
+logs/
+dist/
+
+# Models & data
+backend/vosk-model-*/
+backend/*.gguf
+
+# Env files
+.env
+.env.* 
+
+# Node (global)
+node_modules/
+**/node_modules/ 
+
+# Local copies of external libs/repos
+backend/ollama-cli-main/ 
