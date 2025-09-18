@@ -184,17 +184,19 @@ def generate_response(user_text: str) -> str:
     return f"Ты сказал: {text}"
 
 # ========== Главный цикл (CLI) ==========
-if __name__ == "__main__":
+def run_assistant():
+    """Запуск голосового ассистента Элли в бесконечном цикле."""
     print(f"{ASSISTANT_NAME} запущена. Говорите что-нибудь (Ctrl+C чтобы выйти).")
     try:
         while True:
             user_text = transcribe_once()
             print("Вы сказали:", user_text)
             if not user_text:
-                # можно проиграть короткое уведомление
                 continue
+
             reply = generate_response(user_text)
             print(f"{ASSISTANT_NAME}: {reply}")
             speak(reply)
+
     except KeyboardInterrupt:
         print("Выход по Ctrl+C. Пока!")
