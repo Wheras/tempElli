@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Mic, Send } from "lucide-react";
 import { motion } from "framer-motion";
+import VoiceRecorder from "./components/voiceRecorder";
 
 function App() {
   const [messages, setMessages] = useState<string[]>([]);
@@ -82,8 +83,10 @@ function App() {
             <span className="absolute inset-0 rounded-full bg-red-400 opacity-40 animate-ping"></span>
 
             {/* Иконка */}
-            <Mic size={22} className="relative z-10" />
+            {/*<Mic size={22} className="relative z-10" />*/}
+            
           </button>
+          <VoiceRecorder/>
 
         </div>
       </main>
