@@ -1,87 +1,87 @@
-import React, { useState, useRef } from "react";
+// src/components/VoiceRecorder.tsx
+import { useState, useRef } from 'react';
+import { Mic, Square } from 'lucide-react';
 
-const VoiceRecorder: React.FC = () => {
+interface VoiceRecorderProps {
+  onMessage: (message: any) => void;
+}
+
+const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onMessage }) => {
   const [isRecording, setIsRecording] = useState(false);
-  const [recognizedText, setRecognizedText] = useState("");
-  const [assistantReply, setAssistantReply] = useState("");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunks = useRef<Blob[]>([]);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunks.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+        } 
+      });
+      
+      streamRef.current = stream;
+      
+      const recorder = new MediaRecorder(stream);
+      mediaRecorder.current = recorder;
 
-      mediaRecorder.ondataavailable = (event) => {
+      // Начало записи
+      onMessage({ type: 'voice_start' });
+
+      recorder.ondataavailable = async (event) => {
         if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
+          // Конвертируем в base64
+          const reader = new FileReader();
+          reader.onload = () => {
+            onMessage({
+              type: 'voice_chunk',
+              audio: reader.result
+            });
+          };
+          reader.readAsDataURL(event.data);
         }
       };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks.current, { type: "audio/wav" });
-        await sendAudio(audioBlob);
-      };
-
-      mediaRecorder.start();
+      recorder.start(500); // Чанки каждые 500мс
       setIsRecording(true);
-    } catch (err) {
-      console.error("Ошибка доступа к микрофону:", err);
+      
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      alert('Не удалось получить доступ к микрофону');
     }
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-  };
-
-  const sendAudio = async (audioBlob: Blob) => {
-    const formData = new FormData();
-    formData.append("file", audioBlob, "voice.wav");
-console.log("12313123131313213")
-    try {
-      const res = await fetch("http://127.0.0.1:8000/api/audio", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-      setRecognizedText(data.text || "Не удалось распознать речь");
-      setAssistantReply(data.reply || "Элли не ответила");
-    } catch (err) {
-      console.error("Ошибка при отправке аудио:", err);
+    if (mediaRecorder.current && isRecording) {
+      mediaRecorder.current.stop();
+      
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      setIsRecording(false);
+      onMessage({ type: 'voice_stop' });
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center space-y-4">
-      <button
-        onClick={isRecording ? stopRecording : startRecording}
-        className={`p-4 rounded-full text-white transition-all duration-300 ${
-          isRecording
-            ? "bg-red-500 animate-pulse"
-            : "bg-indigo-600 hover:bg-indigo-700"
-        }`}
-      >
-        {isRecording ? "⏹ Остановить" : "🎤 Записать"}
-      </button>
-
-      {recognizedText && (
-        <div className="text-center text-indigo-200">
-          <p className="text-sm">Вы сказали:</p>
-          <p className="font-semibold">{recognizedText}</p>
-        </div>
+    <button
+      onClick={isRecording ? stopRecording : startRecording}
+      className={`relative flex items-center justify-center w-12 h-12 rounded-full text-white transition shadow-md ${
+        isRecording 
+          ? 'bg-red-600 hover:bg-red-700' 
+          : 'bg-green-500 hover:bg-green-600'
+      }`}
+    >
+      {isRecording ? (
+        <>
+          <span className="absolute inset-0 rounded-full bg-red-400 opacity-40 animate-ping"></span>
+          <Square size={20} className="relative z-10" />
+        </>
+      ) : (
+        <Mic size={20} className="relative z-10" />
       )}
-
-      {assistantReply && (
-        <div className="text-center text-white bg-indigo-900/30 p-3 rounded-xl shadow-md w-80">
-          <p className="text-sm opacity-70">Ответ Элли:</p>
-          <p className="font-medium">{assistantReply}</p>
-        </div>
-      )}
-    </div>
+    </button>
   );
 };
 
