@@ -125,27 +125,27 @@ function App() {
     };
 
     // Обновляем чаты
-    const updatedChats = chats.map(chat => 
-      chat.id === activeChatId 
-        ? {
-            ...chat,
-            messages: [...chat.messages, userMessage],
-            lastActivity: new Date(),
-            title: chat.messages.length === 0 ? input.slice(0, 30) + (input.length > 30 ? '...' : '') : chat.title
-          }
-        : chat
-    );
-
-    setChats(updatedChats);
-    setInput("");
-    setIsLoading(true);
-    setError(null);
+    setChats(prevChats =>
+  prevChats.map(chat =>
+    chat.id === activeChatId
+      ? {
+          ...chat,
+          messages: [...chat.messages, userMessage],
+          lastActivity: new Date(),
+          title: chat.messages.length === 0
+            ? input.slice(0, 30) + (input.length > 30 ? '...' : '')
+            : chat.title
+        }
+      : chat
+  )
+);
 
     // Отправляем на сервер
-    const success = sendMessage({
-      type: "text_message",
-      text: input
-    });
+    const success = sendMessage({ type: "text_message", text: input });
+if (!success) {
+  setIsLoading(false);
+  handleError("Не удалось отправить сообщение. Проверьте подключение.");
+}
     
     if (!success) {
       setIsLoading(false);
