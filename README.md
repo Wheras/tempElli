@@ -1,9 +1,11 @@
-# Элли — офлайн голосовой ассистент (Vosk + Silero TTS + локальная LLM)
+# Элли — офлайн голосовой ассистент (Vosk + FastAPI WebSocket + локальная LLM)
 
-Проект содержит:
+Актуальная структура:
 
-- backend (Python): распознавание речи (Vosk), синтез речи (Silero TTS), офлайн-логика/локальная LLM (GPT4All)
-- frontend (React + Vite + Tailwind): пример фронта
+- backend (Python): FastAPI‑сервер `backend/websocket_server.py` с WebSocket `/ws` и REST `/health`, распознавание речи (Vosk), опционально локальная LLM (GPT4All)
+- frontend (React + Vite + Tailwind): каталог `react-ts-vite-tailwind`
+
+Файлы `backend/Beta.py` и `backend/Controller.py` больше не используются.
 
 ## Требования
 
@@ -11,64 +13,68 @@
 - Python 3.10+
 - Node.js LTS (npm)
 
-## Быстрый старт
-
-1. Открыть PowerShell в корне проекта и запустить установку:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
-.\setup.ps1
-```
-
-2. Активировать виртуальное окружение Python:
+## Установка
 
 ```powershell
 # из корня проекта
-.ackend\.venv\Scripts\Activate.ps1
+py -m venv .venv
+
+# PowerShell:
+./.venv/Scripts/Activate.ps1
+
+# CMD (альтернатива):
+REM .\.venv\Scripts\activate.bat
+
+# Установка Python-зависимостей
+python -m pip install -r backend/requirements.txt
+
+# Установка фронтенда
+cd ./react-ts-vite-tailwind
+npm ci
+cd ..
 ```
 
-3. (Опционально) Локальная LLM: скачать GGUF в `backend/` (например, Qwen 1.5B):
+Опционально: скачайте GGUF‑модель в `backend/` (например Qwen 1.5B): `qwen2.5-1.5b-instruct-q4_k_m.gguf`.
 
-- `https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF`
-- файл: `qwen2.5-1.5b-instruct-q4_k_m.gguf`
+## Запуск
 
-4. Запустить бэкенд:
+Backend:
 
 ```powershell
-python .\backend\Beta.py
+python ./backend/websocket_server.py
+# WebSocket: ws://127.0.0.1:8003/ws
+# Health:    http://127.0.0.1:8003/health
 ```
 
-5. Запустить фронтенд:
+Frontend:
 
 ```powershell
-cd .\react-ts-vite-tailwind
+cd ./react-ts-vite-tailwind
 npm run dev
+# Открыть: http://127.0.0.1:5173
 ```
 
 ## Конфигурация
 
-- Путь к модели Vosk: `backend/Beta.py` → `MODEL_PATH` указывает на `backend/vosk-model-small-ru-0.22`
-- Частота дискретизации: `SAMPLE_RATE` (по умолчанию 18000)
-- Локальная LLM (опционально): `GGUF_PATH` в `backend/Beta.py` — имя `.gguf` в папке `backend/`
+- Путь к модели Vosk: `backend/websocket_server.py` → `MODEL_PATH` (по умолчанию `backend/vosk-model-small-ru-0.22`)
+- Частота дискретизации: `SAMPLE_RATE` (по умолчанию 16000)
+- Локальная LLM: `GGUF_PATH` в `backend/websocket_server.py`
+- CORS открыт для локальной разработки
+
+## Диагностика WebSocket
+
+1. Убедитесь, что backend запущен и `http://127.0.0.1:8003/health` отвечает JSON.
+2. Фронтенд должен подключаться к `ws://127.0.0.1:8003/ws` (см. `react-ts-vite-tailwind/src/App.tsx` и `src/hooks/useWebSocket.ts`).
+3. Если соединение закрывается кодом 1006/1005:
+   - Откройте фронт по HTTP (для локалки используем `ws://`, не `wss://`).
+   - Разрешите соединения в брандмауэре Windows для Python/uvicorn.
+   - В `health` поле `connections` должно быть ≥ 1 при открытой вкладке фронта.
 
 ## Состав backend/requirements.txt
 
 - sounddevice, vosk, torch, numpy, fastapi, uvicorn[standard], omegaconf, gpt4all
 
-## Публикация на GitHub
-
-```powershell
-# в корне проекта
-git init
-git branch -M main
-git add .
-git commit -m "Initial commit: setup + backend/frontend"
-# создайте пустой репозиторий на GitHub и замените URL ниже
-git remote add origin https://github.com/<your_user>/<your_repo>.git
-git push -u origin main
-```
-
 ## Примечания
 
-- Крупные файлы (venv, node_modules, модели Vosk/GGUF) исключены в .gitignore
-- Если не нужна LLM — всё уже работает офлайн на правилах без сети
+- Крупные файлы (venv, node_modules, модели Vosk/GGUF) исключены в `.gitignore`
+- Если LLM не нужна — ассистент отвечает базовыми фразами без сети
