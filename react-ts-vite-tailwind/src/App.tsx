@@ -103,7 +103,7 @@ function App() {
     );
   };
 
-  const { sendMessage, isConnected } = useWebSocket("ws://localhost:8002/ws", {
+  const { sendMessage, isConnected } = useWebSocket("ws://localhost:8003/ws", {
     onAssistantResponse: handleAssistantResponse,
     onError: handleError
   });

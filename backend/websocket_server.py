@@ -1,23 +1,21 @@
 # websocket_server.py
 import os
 import json
-import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
 import base64
-import tempfile
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 # ================== Настройки ==================
 SAMPLE_RATE = 16000
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "vosk-model-small-ru-0.22")
 ASSISTANT_NAME = "Элли"
-SPEAKER = "kseniya_v2" 
+SPEAKER = "kseniya_v2"
 GGUF_PATH = os.path.join(os.path.dirname(__file__), "qwen2.5-1.5b-instruct-q4_k_m.gguf")
 
 # ================== Импорт моделей ==================
 print("🔄 Загружаю AI модели...")
 
-# Пробуем загрузить Vosk для распознавания речи
+# Vosk
 try:
     from vosk import Model, KaldiRecognizer
     print("📦 Загружаю Vosk модель...")
@@ -29,7 +27,7 @@ except Exception as e:
     vosk_model = None
     HAS_VOSK = False
 
-# Пробуем загрузить GPT4All для AI
+# GPT4All
 try:
     from gpt4all import GPT4All
     print("📦 Загружаю GPT4All...")
@@ -41,224 +39,159 @@ except Exception as e:
     llm = None
     HAS_LLM = False
 
-# ================== FastAPI приложение ==================
+# ================== FastAPI ==================
 app = FastAPI(title="Elli AI Assistant")
 
-# CORS настройки
-from fastapi.middleware.cors import CORSMiddleware
-
+# 🧩 CORS полностью открыт для фронта (localhost / 127.0.0.1)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # или ["http://localhost:5173"]
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "*",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ================== Функции из Beta.py ==================
+# ================== Помощники ==================
 def generate_response(user_text: str) -> str:
-    """Генерация ответа (LLM или fallback)"""
-    text = (user_text or "").strip()
-    if not text:
+    if not user_text.strip():
         return "Я не расслышала — повтори, пожалуйста."
 
-    # GPT4All
-    if HAS_LLM and llm is not None:
+    if HAS_LLM and llm:
         try:
-            prompt = (
-                f"Ты помощник по имени {ASSISTANT_NAME}. Отвечай кратко и дружелюбно.\n"
-                f"Вопрос: {text}\nОтвет:"
-            )
             with llm.chat_session():
-                resp = llm.generate(prompt, max_tokens=256, temp=0.6)
-            if isinstance(resp, str) and resp.strip():
-                return resp.strip()
+                prompt = f"Ты помощник {ASSISTANT_NAME}. Отвечай кратко и дружелюбно.\nВопрос: {user_text}\nОтвет:"
+                resp = llm.generate(prompt, max_tokens=128, temp=0.7)
+                return resp.strip() if isinstance(resp, str) else str(resp)
         except Exception as e:
-            print(f"Ошибка локальной LLM: {e}")
+            print(f"Ошибка LLM: {e}")
 
-    # Простой fallback
-    lower = text.lower()
-    if any(x in lower for x in ["как тебя зовут", "твое имя", "твоё имя", "кто ты"]):
-        return "Меня зовут Элли. Чем могу помочь?"
-    if any(x in lower for x in ["привет", "здравств", "добрый"]):
-        return "Привет! Я слушаю."
-    if any(x in lower for x in ["пока", "до свид", "увидимс"]):
-        return "Пока!"
-    if any(x in lower for x in ["спасибо", "благодар"]):
-        return "Пожалуйста! Рада была помочь!"
-
-    return f"Вы сказали: '{text}'. Я ваш AI-помощник Элли! 🤖"
+    low = user_text.lower()
+    if "привет" in low: return "Привет! Я слушаю тебя 👋"
+    if "как тебя зовут" in low: return f"Я {ASSISTANT_NAME}."
+    if "пока" in low: return "Пока! 👋"
+    if "спасибо" in low: return "Всегда пожалуйста 💚"
+    return f"Вы сказали: {user_text}"
 
 def transcribe_audio_chunk(audio_data: bytes) -> str:
-    """Распознает речь из аудио данных"""
-    if not HAS_VOSK or vosk_model is None:
+    if not HAS_VOSK or not vosk_model:
         return ""
-    
     try:
-        recognizer = KaldiRecognizer(vosk_model, SAMPLE_RATE)
-        if recognizer.AcceptWaveform(audio_data):
-            result = json.loads(recognizer.Result())
-            return result.get("text", "").strip()
-        else:
-            partial = json.loads(recognizer.PartialResult())
-            return partial.get("partial", "").strip()
+        rec = KaldiRecognizer(vosk_model, SAMPLE_RATE)
+        if rec.AcceptWaveform(audio_data):
+            res = json.loads(rec.Result())
+            return res.get("text", "")
+        return ""
     except Exception as e:
         print(f"Ошибка распознавания: {e}")
         return ""
 
-# ================== WebSocket логика ==================
+# ================== WebSocket ==================
 class ConnectionManager:
     def __init__(self):
         self.active_connections = []
         self.recognizers = {}
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        # Создаем распознаватель для каждого соединения
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active_connections.append(ws)
         if HAS_VOSK:
-            self.recognizers[websocket] = KaldiRecognizer(vosk_model, SAMPLE_RATE)
-        print(f"✅ Client connected. Total: {len(self.active_connections)}")
+            self.recognizers[ws] = KaldiRecognizer(vosk_model, SAMPLE_RATE)
+        print(f"✅ Подключился клиент ({len(self.active_connections)})")
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        if websocket in self.recognizers:
-            del self.recognizers[websocket]
-        print(f"❌ Client disconnected. Total: {len(self.active_connections)}")
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active_connections:
+            self.active_connections.remove(ws)
+        if ws in self.recognizers:
+            del self.recognizers[ws]
+        print(f"❌ Клиент отключился ({len(self.active_connections)})")
 
-    async def send_message(self, message: dict, websocket: WebSocket):
-        await websocket.send_text(json.dumps(message))
+    async def send_json(self, ws: WebSocket, message: dict):
+        try:
+            await ws.send_text(json.dumps(message))
+        except Exception as e:
+            print(f"Ошибка отправки: {e}")
 
 manager = ConnectionManager()
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    
+async def websocket_endpoint(ws: WebSocket):
+    await manager.connect(ws)
+    print("✅ Клиент подключился")
+
     try:
         while True:
-            # Получаем данные от клиента
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            if message["type"] == "text_message":
-                # Обрабатываем текстовое сообщение
-                user_text = message.get("text", "")
-                print(f"👤 Текст: {user_text}")
-                
-                # Генерируем ответ
-                response_text = generate_response(user_text)
-                
-                await manager.send_message({
-                    "type": "assistant_response", 
-                    "text": response_text,
-                    "transcribed_text": user_text
-                }, websocket)
-                print(f"🤖 Ответ: {response_text}")
-                
-            elif message["type"] == "voice_chunk":
-                # Обрабатываем аудио чанк
-                if HAS_VOSK:
-                    try:
-                        # Декодируем base64 аудио
-                        audio_base64 = message.get("audio", "")
-                        if audio_base64.startswith('data:audio'):
-                            audio_base64 = audio_base64.split(',')[1]
-                        
-                        audio_data = base64.b64decode(audio_base64)
-                        
-                        # Распознаем речь
-                        recognizer = manager.recognizers.get(websocket)
-                        if recognizer:
-                            text = transcribe_audio_chunk(audio_data)
-                            
-                            if text and len(text) > 2:  # Если есть осмысленный текст
-                                response = generate_response(text)
-                                await manager.send_message({
-                                    "type": "assistant_response",
-                                    "text": response,
-                                    "transcribed_text": text
-                                }, websocket)
-                    except Exception as e:
-                        print(f"❌ Ошибка обработки аудио: {e}")
-                        await manager.send_message({
-                            "type": "error",
-                            "message": "Ошибка обработки аудио"
-                        }, websocket)
-                
-            elif message["type"] == "voice_start":
-                # Начало записи - сбрасываем распознаватель
-                if HAS_VOSK and websocket in manager.recognizers:
-                    manager.recognizers[websocket] = KaldiRecognizer(vosk_model, SAMPLE_RATE)
-                await manager.send_message({
-                    "type": "listening_started",
-                    "text": "Слушаю..."
-                }, websocket)
-                
-            elif message["type"] == "voice_stop":
-                # Конец записи - получаем финальный результат
-                if HAS_VOSK:
-                    recognizer = manager.recognizers.get(websocket)
-                    if recognizer:
-                        final_result = json.loads(recognizer.FinalResult())
-                        text = final_result.get('text', '')
-                        if text:
-                            response = generate_response(text)
-                            await manager.send_message({
-                                "type": "assistant_response",
-                                "text": response,
-                                "transcribed_text": text
-                            }, websocket)
-                        
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+            msg_data = await ws.receive_text()
+            print(msg_data)
+            if not msg_data:
+                continue  # пустое сообщение — просто ждём следующее
+
+            try:
+                msg = json.loads(msg_data)
+            except json.JSONDecodeError:
+                print(f"⚠️ Некорректный JSON: {msg_data}")
+                continue
+
+            msg_type = msg.get("type")
+
+            # 🧠 Обработка текстовых сообщений
+            if msg_type == "text_message":
+                text = msg.get("text", "")
+                print(f"👤 Текст: {text}")
+                reply = generate_response(text)
+                await manager.send_json(ws, {
+                    "type": "assistant_response",
+                    "text": reply,
+                    "transcribed_text": text
+                })
+                print(f"🤖 Ответ: {reply}")
+
+            # 🎤 Обработка голосовых чанков
+            elif msg_type == "voice_chunk":
+                b64 = msg.get("audio", "")
+                if b64.startswith("data:"):
+                    b64 = b64.split(",")[1]
+                audio = base64.b64decode(b64)
+                text = transcribe_audio_chunk(audio)
+                if text:
+                    reply = generate_response(text)
+                    await manager.send_json(ws, {
+                        "type": "assistant_response",
+                        "text": reply,
+                        "transcribed_text": text
+                    })
+
+            else:
+                print(f"⚠️ Неизвестный тип сообщения: {msg_type}")
+
+    except WebSocketDisconnect as e:
+        print(f"❌ Клиент отключился: {e}1")
+        manager.disconnect(ws)
     except Exception as e:
-        print(f"❌ WebSocket error: {e}")
-        manager.disconnect(websocket)
+        print(f"❌ Ошибка WebSocket: {e}")
+        manager.disconnect(ws)
 
-# REST endpoint для тестирования
-@app.post("/api/chat")
-async def chat(text: str):
-    """REST endpoint для текстовых сообщений"""
-    response = generate_response(text)
-    return {
-        "response": response,
-        "transcribed_text": text,
-        "status": "success"
-    }
-
+# ================== REST тест ==================
 @app.get("/")
 async def root():
-    return {
-        "message": "Elli AI WebSocket Server", 
-        "status": "healthy",
-        "ai_loaded": HAS_LLM,
-        "speech_loaded": HAS_VOSK,
-        "assistant_name": ASSISTANT_NAME
-    }
+    return {"message": "Elli AI WebSocket Server работает 🚀"}
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy", 
-        "connections": len(manager.active_connections),
-        "models": {
-            "ai": HAS_LLM,
-            "speech_recognition": HAS_VOSK
-        }
-    }
+    return {"connections": len(manager.active_connections), "vosk": HAS_VOSK, "llm": HAS_LLM}
 
+# ================== Запуск ==================
 if __name__ == "__main__":
     import uvicorn
-    
     print("=" * 50)
     print("🚀 Elli AI WebSocket Server")
     print("=" * 50)
-    print(f"📡 WebSocket: ws://localhost:8002/ws")
-    print(f"📖 REST API:  http://localhost:8002/docs")
-    print(f"🤖 AI Model:  {'✅ Загружена' if HAS_LLM else '❌ Не доступна'}")
-    print(f"🎤 Speech:    {'✅ Загружена' if HAS_VOSK else '❌ Не доступна'}")
+    print("📡 WebSocket: ws://localhost:8003/ws")
+    print("📖 REST API:  http://localhost:8003/docs")
     print("=" * 50)
-    
-    uvicorn.run(app, host="0.0.0.0", port=8002, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8003)

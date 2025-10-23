@@ -18,7 +18,7 @@ function getAutoWebSocketUrl(customUrl?: string): string {
   const protocol = loc.protocol === "https:" ? "wss:" : "ws:";
   const host =
     loc.hostname === "localhost" || loc.hostname === "127.0.0.1"
-      ? "localhost:8002" // порт твоего Python-сервера
+      ? "localhost:8003" // порт твоего Python-сервера
       : loc.host;
 
   return `${protocol}//${host}/ws`;
@@ -27,7 +27,8 @@ function getAutoWebSocketUrl(customUrl?: string): string {
 export function useWebSocket(customUrl?: string, opts: UseWebSocketOptions = {}) {
   const url = getAutoWebSocketUrl(customUrl);
   const { onAssistantResponse, onError, reconnectAttempts = Infinity, reconnectInterval = 1000 } = opts;
-  const wsRef = useRef<WebSocket | null>(null);
+
+  const wsRef = useRef<WebSocket | null>(null); // <--- добавь это
   const shouldReconnect = useRef(true);
   const attemptsRef = useRef(0);
   const reconnectTimer = useRef<number | null>(null);
