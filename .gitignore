@@ -31,3 +31,4 @@ node_modules/
 
 # Local copies of external libs/repos
 backend/ollama-cli-main/ 
+backend/mistral-env/
